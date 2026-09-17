@@ -7,3 +7,61 @@ datasource db {
   provider = "postgresql"
 }
 
+enum Role {
+  USER
+  ADMIN
+}
+
+enum TransactionType {
+  DEPOSIT
+  WITHDRAW
+  TRANSFER
+}
+
+enum Status {
+  PENDING
+  COMPLETED
+  FAILED
+}
+
+model User {
+  id String @id @unique @default(uuid(7))
+  email String @unique @db.VarChar(64) @default("test@test.com")
+  password String @db.VarChar(60) @default("88888888")
+  role Role @default(USER) 
+  wallet Wallet?
+  auditLog AuditLog[]
+  createAt DateTime @default(now())
+}
+
+model Wallet {
+  id String @id @unique @default(uuid(7))
+  balance Int @default(0)
+  userId String @unique
+  user User @relation(fields: [userId], references: [id])
+  sentTransactions Transaction[] @relation("FromWallet")
+  receivedTransactions Transaction[] @relation("ToWallet")
+  createAt DateTime @default(now())
+}
+
+model Transaction {
+  id String @id @unique @default(uuid(7))
+  type TransactionType
+  amount Int
+  fromWalletId String?
+  fromWallet Wallet? @relation("FromWallet", fields: [fromWalletId], references: [id])
+  toWalletId String?
+  toWallet Wallet? @relation("ToWallet", fields: [toWalletId], references: [id])
+  status Status
+  idempotencyKey String @unique
+  createAt DateTime @default(now())
+}
+
+model AuditLog {
+  id String @id @unique @default(uuid(7))
+  userId String 
+  actorUser User @relation(fields: [userId], references: [id])
+  action String
+  metadata Json
+  createAt DateTime @default(now())
+}

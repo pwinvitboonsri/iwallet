@@ -1,114 +1,129 @@
-<p align="center">
-  <a href="http://nestjs.com/" target="blank"><img src="https://nestjs.com/img/logo-small.svg" width="120" alt="Nest Logo" /></a>
-</p>
+# i-wallet
 
-[circleci-image]: https://img.shields.io/circleci/build/github/nestjs/nest/master?token=abc123def456
-[circleci-url]: https://circleci.com/gh/nestjs/nest
+A digital wallet API built with NestJS, Prisma, and PostgreSQL. Users can register, log in, and deposit, withdraw, or transfer money between wallets — with idempotent writes, an audit trail, and concurrency-safe balance updates.
 
-  <p align="center">A progressive <a href="http://nodejs.org" target="_blank">Node.js</a> framework for building efficient and scalable server-side applications.</p>
-    <p align="center">
-<a href="https://www.npmjs.com/~nestjscore" target="_blank"><img src="https://img.shields.io/npm/v/@nestjs/core.svg" alt="NPM Version" /></a>
-<a href="https://www.npmjs.com/~nestjscore" target="_blank"><img src="https://img.shields.io/npm/l/@nestjs/core.svg" alt="Package License" /></a>
-<a href="https://www.npmjs.com/~nestjscore" target="_blank"><img src="https://img.shields.io/npm/dm/@nestjs/common.svg" alt="NPM Downloads" /></a>
-<a href="https://circleci.com/gh/nestjs/nest" target="_blank"><img src="https://img.shields.io/circleci/build/github/nestjs/nest/master" alt="CircleCI" /></a>
-<a href="https://discord.gg/G7Qnnhy" target="_blank"><img src="https://img.shields.io/badge/discord-online-brightgreen.svg" alt="Discord"/></a>
-<a href="https://opencollective.com/nest#backer" target="_blank"><img src="https://opencollective.com/nest/backers/badge.svg" alt="Backers on Open Collective" /></a>
-<a href="https://opencollective.com/nest#sponsor" target="_blank"><img src="https://opencollective.com/nest/sponsors/badge.svg" alt="Sponsors on Open Collective" /></a>
-  <a href="https://paypal.me/kamilmysliwiec" target="_blank"><img src="https://img.shields.io/badge/Donate-PayPal-ff3f59.svg" alt="Donate us"/></a>
-    <a href="https://opencollective.com/nest#sponsor"  target="_blank"><img src="https://img.shields.io/badge/Support%20us-Open%20Collective-41B883.svg" alt="Support us"></a>
-  <a href="https://twitter.com/nestframework" target="_blank"><img src="https://img.shields.io/twitter/follow/nestframework.svg?style=social&label=Follow" alt="Follow us on Twitter"></a>
-</p>
-  <!--[![Backers on Open Collective](https://opencollective.com/nest/backers/badge.svg)](https://opencollective.com/nest#backer)
-  [![Sponsors on Open Collective](https://opencollective.com/nest/sponsors/badge.svg)](https://opencollective.com/nest#sponsor)-->
+This project is a capstone exercise from the *NestJS Backend Architecture* module of a self-directed backend learning roadmap.
 
-## Description
+## Tech stack
 
-[Nest](https://github.com/nestjs/nest) framework TypeScript starter repository.
+- **Framework:** NestJS 12
+- **Language:** TypeScript
+- **Database:** PostgreSQL (hosted on [Neon](https://neon.tech), serverless)
+- **ORM:** Prisma 7 (driver adapter: `@prisma/adapter-pg`)
+- **Auth:** JWT (`@nestjs/jwt` + `@nestjs/passport`)
+- **Validation:** `class-validator` / `class-transformer`
+- **Docs:** Swagger / OpenAPI (`@nestjs/swagger`, auto-generated from TypeScript types and JSDoc comments)
+- **Rate limiting:** `@nestjs/throttler`
+- **Testing:** Vitest (unit + e2e), Supertest
+- **Password hashing:** bcrypt
 
-## Project setup
+## Features
+
+- **Auth:** register (creates a `User` + a zero-balance `Wallet` in one atomic transaction) and login (returns a JWT)
+- **Wallet operations:** deposit, withdraw, transfer between wallets — each wrapped in a single database transaction covering the balance update, the transaction record, and the audit log entry
+- **Idempotency:** every write to `/wallets/*` requires a client-generated UUID v7 `idempotencyKey`. Repeating the same key returns the original result instead of performing the operation twice
+- **Balance integrity:** a `CHECK (balance >= 0)` constraint at the database level, plus an explicit balance check in the withdraw service, defend against overdrafts — verified under 50 concurrent withdrawal requests in `test/wallets-concurrency.e2e-spec.ts`
+- **Audit log:** every balance-changing action writes an `AuditLog` row (many-to-one with `User`) inside the same transaction as the balance change
+- **RBAC:** `USER` / `ADMIN` roles enforced via a `RolesGuard` reading `@Roles()` metadata
+- **Rate limiting:** per-user throttling (falls back to per-IP for unauthenticated requests) on wallet-mutating endpoints
+- **Admin endpoints:** inspect any wallet and filter/paginate all transactions by status or type
+- **Health check:** `/health` verifies the database connection via `@nestjs/terminus`
+- **API docs:** interactive Swagger UI at `/docs`, generated automatically from DTO/entity types and JSDoc `@example` tags — no manual `@ApiProperty()` needed
+
+## Prerequisites
+
+- Node.js (see `package.json` engines / `.nvmrc` if present)
+- A PostgreSQL database (this project targets a Neon serverless instance, but any Postgres 16+ works)
+
+## Environment variables
+
+Create a `.env` file in the project root:
+
+| Variable | Description | Example |
+|---|---|---|
+| `DATABASE_URL` | Pooled connection string, used by the running app | `postgresql://user:pass@host-pooler.neon.tech/db?sslmode=require` |
+| `DIRECT_URL` | Direct (non-pooled) connection string, used by `prisma migrate` | `postgresql://user:pass@host.neon.tech/db?sslmode=require` |
+| `JWT_SECRET` | Secret used to sign/verify JWTs — generate with `openssl rand -hex 64` | `a3f5c9e2...` |
+| `JWT_EXPIRES_IN` | JWT lifetime | `1d` |
+| `PORT` | HTTP port (optional, defaults to `3000`) | `3000` |
+
+## Setup
 
 ```bash
-$ npm install
+npm install
+npx prisma migrate dev
 ```
 
-## Compile and run the project
+## Running the app
 
 ```bash
-# development
-$ npm run start
+# development (watch mode)
+npm run start:dev
 
-# watch mode
-$ npm run start:dev
-
-# production mode
-$ npm run start:prod
+# production
+npm run build
+npm run start:prod
 ```
 
-## Run tests
+Once running:
+- API base URL: `http://localhost:3000`
+- Swagger docs: `http://localhost:3000/docs`
+
+## API overview
+
+All request/response shapes, validation rules, and examples are documented in Swagger (`/docs`). Summary:
+
+| Method | Path | Auth | Description |
+|---|---|---|---|
+| POST | `/users` | — | Register a new user + wallet |
+| POST | `/users/login` | — | Log in, returns a JWT |
+| GET | `/users/:id` | JWT | Get a user by id |
+| GET | `/wallets/me` | JWT | Get the logged-in user's wallet |
+| GET | `/wallets/me/transaction` | JWT | Paginated transaction history for the logged-in user |
+| POST | `/wallets/deposit` | JWT | Deposit into the logged-in user's wallet |
+| POST | `/wallets/withdraw` | JWT | Withdraw from the logged-in user's wallet |
+| POST | `/wallets/transfer` | JWT | Transfer to another wallet by wallet id |
+| GET | `/admin/wallets/:id` | JWT + Admin | Look up any wallet |
+| GET | `/admin/transactions` | JWT + Admin | Paginated, filterable transaction list |
+| GET | `/health` | — | Database connectivity check |
+
+Deposit, withdraw, and transfer all require an `idempotencyKey` (UUID v7) in the request body.
+
+## Testing
 
 ```bash
+# e2e tests (spins up the full Nest app in-process against the real database)
+npm run test:e2e
+
 # unit tests
-$ npm run test
+npm run test
 
-# e2e tests
-$ npm run test:e2e
-
-# test coverage
-$ npm run test:cov
+# coverage
+npm run test:cov
 ```
 
-## Deployment
+`test/wallets-concurrency.e2e-spec.ts` fires 50 concurrent withdrawal requests at a single wallet and asserts the final balance matches exactly what the successful requests should have spent, with no negative balance.
 
-When you're ready to deploy your NestJS application to production, there are some key steps you can take to ensure it runs as efficiently as possible. Check out the [deployment documentation](https://docs.nestjs.com/deployment) for more information.
+## Project structure
 
-If you are looking for a cloud-based platform to deploy your NestJS application, check out [Mau](https://mau.nestjs.com), our official platform for deploying NestJS applications on AWS. Mau makes deployment straightforward and fast, requiring just a few simple steps:
-
-```bash
-$ npm install -g @nestjs/mau
-$ mau deploy
+```
+src/
+  admin/       # admin-only wallet/transaction inspection
+  audit/       # AuditService — writes audit log entries within a caller-provided transaction
+  auth/        # JWT strategy, guards (JwtAuthGuard, RolesGuard, UserThrottlerGuard)
+  common/      # shared decorators, exception filter, pagination helper
+  health/      # /health endpoint (Terminus)
+  prisma/      # PrismaService (driver-adapter based PrismaClient)
+  users/       # register/login
+  wallets/     # deposit/withdraw/transfer, wallet + transaction reads
+prisma/
+  schema.prisma
+  migrations/
+test/
+  *.e2e-spec.ts
 ```
 
-With Mau, you can deploy your application in just a few clicks, allowing you to focus on building features rather than managing infrastructure.
+## Known limitations
 
-## Observability
-
-In production applications, observability is essential for understanding how your system behaves, detecting issues early, and maintaining reliable performance.
-
-[NestJS Observe](https://observe.nestjs.com) automatically instruments your NestJS application, giving you deep visibility into your system with minimal setup:
-
-- **Distributed tracing:** Follow requests across services and understand how they flow through your system.
-- **Waterfall analysis:** Visualize request execution and identify slow operations, bottlenecks, and unexpected delays.
-- **Performance analysis:** Analyze application performance in real time and quickly pinpoint areas that need optimization.
-- **Metrics:** Track key application and infrastructure metrics to understand system health and performance trends.
-- **Logging:** Centralize and correlate logs with traces and other telemetry to make debugging easier.
-- **Error tracking:** Detect errors quickly and investigate their root causes with the surrounding context.
-- **SLA monitoring:** Track service-level objectives and identify when your application is approaching or exceeding defined thresholds.
-- **Alarms and alerts:** Set up alerts for critical errors, performance degradation, SLA violations, and other anomalies so your team can react quickly.
-
-## Resources
-
-Check out a few resources that may come in handy when working with NestJS:
-
-- Visit the [NestJS Documentation](https://docs.nestjs.com) to learn more about the framework.
-- For questions and support, please visit our [Discord channel](https://discord.gg/G7Qnnhy).
-- To dive deeper and get more hands-on experience, check out our official video [courses](https://courses.nestjs.com/).
-- Deploy your application to AWS with the help of [NestJS Mau](https://mau.nestjs.com) in just a few clicks.
-- Auto-instrument your application with [NestJS Observer](https://observer.nestjs.com). Distributed tracing, metrics, and logging made easy. Error tracking and performance monitoring for your NestJS applications.
-- Visualize your application graph and interact with the NestJS application in real-time using [NestJS Devtools](https://devtools.nestjs.com).
-- Need help with your project (part-time to full-time)? Check out our official [enterprise support](https://enterprise.nestjs.com).
-- To stay in the loop and get updates, follow us on [X](https://x.com/nestframework) and [LinkedIn](https://linkedin.com/company/nestjs).
-- Looking for a job, or have a job to offer? Check out our official [Jobs board](https://jobs.nestjs.com).
-
-## Support
-
-Nest is an MIT-licensed open source project. It can grow thanks to the sponsors and support by the amazing backers. If you'd like to join them, please [read more here](https://docs.nestjs.com/support).
-
-## Stay in touch
-
-- Author - [Kamil Myśliwiec](https://twitter.com/kammysliwiec)
-- Website - [https://nestjs.com](https://nestjs.com/)
-- Twitter - [@nestframework](https://twitter.com/nestframework)
-
-## License
-
-Nest is [MIT licensed](https://github.com/nestjs/nest/blob/master/LICENSE).
+- Transfers only accept a destination `walletId` — transferring by recipient email is not implemented in this version.
+- Service-level unit tests (mocking Prisma) are not yet written; correctness is currently covered by e2e tests only.
